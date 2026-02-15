@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Villager's Journey - RPG</title>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Kanit:wght@300;400&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #ffd700;
+            --warrior: #ff4d4d;
+            --tank: #4d94ff;
+            --mage: #b366ff;
+            --ranger: #4dff88;
+            --bg-dark: #0f0f15;
+            --panel-bg: rgba(20, 20, 30, 0.9);
+        }
+
+        body {
+            margin: 0; background: var(--bg-dark); color: #e0e0e0;
+            font-family: 'Kanit', sans-serif; height: 100vh; display: flex;
+            justify-content: center; align-items: center; overflow: hidden;
+        }
+
+        #game-window {
+            width: 95vw; height: 90vh; display: grid;
+            grid-template-columns: 320px 1fr 320px; gap: 20px;
+            padding: 20px; border: 2px solid #333; border-radius: 15px;
+            background: linear-gradient(135deg, #1a1a2e 0%, #0f0f15 100%);
+            box-shadow: 0 0 50px rgba(0,0,0,0.5);
+        }
+
+        .panel {
+            background: var(--panel-bg); border: 1px solid #444;
+            border-radius: 12px; padding: 20px; overflow-y: auto;
+            display: flex; flex-direction: column;
+        }
+
+        h2 { font-family: 'Cinzel', serif; color: var(--primary); margin-top: 0; border-bottom: 1px solid #444; }
+
+        /* Combat Area */
+        #combat-section { display: flex; flex-direction: column; align-items: center; justify-content: space-between; position: relative; }
+        #stage-info { font-family: 'Cinzel', serif; font-size: 1.5rem; text-align: center; margin-bottom: 20px; }
+        
+        #monster-container {
+            flex-grow: 1; display: flex; flex-direction: column;
+            justify-content: center; align-items: center; width: 100%;
+        }
+        #monster-visual { font-size: 120px; filter: drop-shadow(0 0 20px rgba(255,255,255,0.2)); transition: 0.1s; }
+        .damage-pop { position: absolute; color: red; font-weight: bold; animation: floatUp 0.5s forwards; }
+
+        /* Bars */
+        .bar { width: 100%; height: 12px; background: #222; border-radius: 6px; margin: 10px 0; overflow: hidden; border: 1px solid #444; }
+        .fill { height: 100%; width: 0%; transition: width 0.2s ease-in-out; }
+        #hp-fill { background: linear-gradient(90deg, #ff4d4d, #990000); }
+        #exp-fill { background: linear-gradient(90deg, #ffd700, #ff8c00); }
+
+        /* Class Selection Overlay */
+        #class-modal {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.9); display: none; justify-content: center;
+            align-items: center; z-index: 100;
+        }
+        .modal-content {
+            background: #222; padding: 30px; border-radius: 20px;
+            text-align: center; border: 2px solid var(--primary);
+        }
+        .class-card {
+            display: inline-block; width: 150px; padding: 15px; margin: 10px;
+            border: 1px solid #444; border-radius: 10px; cursor: pointer; transition: 0.3s;
+        }
+        .class-card:hover { border-color: var(--primary); transform: translateY(-5px); background: #333; }
+
+        /* Inventory & Log */
+        #inventory-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+        .slot { aspect-ratio: 1; background: #111; border: 1px solid #333; border-radius: 4px; display: flex; justify-content: center; align-items: center; font-size: 1.2rem; }
+        #log { font-size: 0.85rem; height: 120px; overflow-y: auto; background: rgba(0,0,0,0.3); padding: 10px; border-radius: 5px; margin-top: 10px; }
+
+        @keyframes floatUp { from { transform: translateY(0); opacity: 1; } to { transform: translateY(-50px); opacity: 0; } }
+
+        button {
+            background: #333; color: white; border: 1px solid #555; padding: 10px;
+            border-radius: 5px; cursor: pointer; font-family: 'Kanit';
+        }
+        button:hover { background: #444; border-color: var(--primary); }
+    </style>
+</head>
+<body>
+
+<div id="game-window">
+    <div class="panel">
+        <h2 id="player-job">ชาวบ้าน (Villager)</h2>
+        <div style="text-align: center;">
+            <span id="player-emoji" style="font-size: 60px;">👨‍🌾</span>
+        </div>
+        <p>Base Level: <span id="lv-text" style="color:var(--primary)">1</span></p>
+        <div class="bar"><div id="exp-fill" class="fill"></div></div>
+        
+        <div style="margin-top: 10px;">
+            <div>อาวุธ: <span id="weapon-text" style="color:#aaa">จอบไม้ (Wooden Hoe)</span></div>
+            <div>พลังโจมตี: <span id="atk-text">5</span></div>
+            <div>ความเร็ว: <span id="spd-text">1.0</span>/วินาที</div>
+        </div>
+
+        <h3 style="border-top: 1px solid #333; padding-top: 15px;">Stage Progress</h3>
+        <p id="stage-name" style="color: #4dff88;">🏡 หมู่บ้านเริ่มต้น</p>
+        
+        <div style="margin-top: auto;">
+            <p>Zeny: <span id="zeny-text" style="color:gold">0</span></p>
+        </div>
+    </div>
+
+    <div id="combat-section" class="panel">
+        <div id="stage-info">STAGE 1-1</div>
+        <div id="monster-container">
+            <h3 id="monster-name">หนูนา</h3>
+            <div id="monster-visual">🐀</div>
+            <div class="bar" style="width: 60%;"><div id="hp-fill" class="fill"></div></div>
+            <div id="hp-text">10 / 10</div>
+        </div>
+        <div id="log"></div>
+    </div>
+
+    <div class="panel">
+        <h2>กระเป๋าเป้</h2>
+        <div id="inventory-grid"></div>
+        
+        <h2 style="margin-top: 20px;">สกิลอาชีพ</h2>
+        <div id="skill-list">
+            <p style="font-size: 0.8rem; color: #777;">ยังไม่มีอาชีพเฉพาะทาง...</p>
+        </div>
+    </div>
+</div>
+
+<div id="class-modal">
+    <div class="modal-content">
+        <h1 id="modal-title">เลือกเส้นทางเดินของคุณ</h1>
+        <div id="class-options"></div>
+    </div>
+</div>
+
+<script>
+    const gameState = {
+        name: "J",
+        lv: 1, exp: 0, expNext: 15,
+        zeny: 0,
+        job: "Villager",
+        tier: 0, // 0: Villager, 1: Recruit/Adept, etc.
+        atk: 5, aspd: 1000,
+        weapon: "จอบไม้ (Wooden Hoe)",
+        inventory: {},
+        currentStage: 1,
+        monsterHp: 10,
+        currentMonster: null
+    };
+
+    const classTree = {
+        tier1: [
+            { id: 'warrior', name: 'ทหารเกณฑ์ (Recruit)', emoji: '⚔️', bonusAtk: 10, color: 'var(--warrior)' },
+            { id: 'tank', name: 'ยามหมู่บ้าน (Militia)', emoji: '🛡️', bonusAtk: 5, color: 'var(--tank)' },
+            { id: 'mage', name: 'เด็กฝึกเวท (Adept)', emoji: '🪄', bonusAtk: 15, color: 'var(--mage)' },
+            { id: 'ranger', name: 'นายพราน (Hunter)', emoji: '🏹', bonusAtk: 8, color: 'var(--ranger)' }
+        ],
+        tier2: {
+            warrior: { name: 'อัศวิน (Knight)', emoji: '🛡️⚔️' },
+            tank: { name: 'ป้อมปราการ (Bulwark)', emoji: '🏰' },
+            mage: { name: 'จอมเวท (Mage)', emoji: '🔮' },
+            ranger: { name: 'มือสังหาร (Assassin)', emoji: '🗡️' }
+        },
+        tier3: {
+            warrior: { name: 'พาราดีน (Paladin)', emoji: '🔱' },
+            tank: { name: 'จักรพรรดิเหล็ก (Iron Sovereign)', emoji: '👑' },
+            mage: { name: 'มหาปราชญ์ (Archmage)', emoji: '🧙‍♂️' },
+            ranger: { name: 'เงาสังหาร (Shadow Walker)', emoji: '👤' }
+        }
+    };
+
+    const monsters = [
+        { name: "หนูนา", emoji: "🐀", hp: 10, exp: 5, zeny: 2, minLv: 1, maxLv: 10, area: "หมู่บ้าน" },
+        { name: "สไลม์ป่า", emoji: "💧", hp: 30, exp: 12, zeny: 5, minLv: 11, maxLv: 50, area: "หมู่บ้าน" },
+        { name: "หมาป่าสีเทา", emoji: "🐺", hp: 150, exp: 45, zeny: 20, minLv: 51, maxLv: 100, area: "ป่ามรณะ" },
+        { name: "กอบลิน", emoji: "👺", hp: 400, exp: 120, zeny: 50, minLv: 101, maxLv: 150, area: "ป่ามรณะ" },
+        { name: "โครงกระดูก", emoji: "💀", hp: 1500, exp: 500, zeny: 150, minLv: 151, maxLv: 300, area: "ดันเจี้ยน" },
+        { name: "ซอมบี้", emoji: "🧟", hp: 3000, exp: 1200, zeny: 400, minLv: 301, maxLv: 500, area: "ดันเจี้ยน" },
+        { name: "มังกรแดง", emoji: "🐉", hp: 20000, exp: 8000, zeny: 2500, minLv: 501, maxLv: 999, area: "วิหารเทพ" }
+    ];
+
+    function init() {
+        spawnMonster();
+        setInterval(autoAttack, gameState.aspd);
+        updateUI();
+        renderInventory();
+    }
+
+    function spawnMonster() {
+        const possible = monsters.filter(m => gameState.lv >= m.minLv);
+        const m = possible[Math.floor(Math.random() * possible.length)];
+        gameState.currentMonster = {...m};
+        gameState.monsterHp = m.hp;
+        
+        document.getElementById('monster-name').innerText = m.name;
+        document.getElementById('monster-visual').innerText = m.emoji;
+        document.getElementById('stage-name').innerText = `📍 ${m.area}`;
+        document.getElementById('stage-info').innerText = `LV. ${gameState.lv}`;
+        updateMonsterUI();
+    }
+
+    function autoAttack() {
+        if (gameState.monsterHp <= 0) return;
+        
+        let dmg = gameState.atk + Math.floor(Math.random() * 3);
+        gameState.monsterHp -= dmg;
+        
+        showDamage(dmg);
+        const visual = document.getElementById('monster-visual');
+        visual.style.transform = "scale(0.8) translateY(10px)";
+        setTimeout(() => visual.style.transform = "scale(1)", 100);
+
+        if (gameState.monsterHp <= 0) {
+            handleVictory();
+        }
+        updateMonsterUI();
+    }
+
+    function handleVictory() {
+        const m = gameState.currentMonster;
+        gameState.exp += m.exp;
+        gameState.zeny += m.zeny;
+        addLog(`กำจัด ${m.name}! ได้รับ ${m.exp} EXP และ ${m.zeny} Zeny`);
+
+        if (gameState.exp >= gameState.expNext) {
+            levelUp();
+        }
+        
+        spawnMonster();
+        updateUI();
+    }
+
+    function levelUp() {
+        gameState.lv++;
+        gameState.exp = 0;
+        gameState.expNext = Math.floor(gameState.expNext * 1.4);
+        gameState.atk += 2;
+        addLog(`<span style="color:var(--primary)">LEVEL UP! ตอนนี้เลเวล ${gameState.lv}</span>`);
+
+        checkClassEvolution();
+    }
+
+    function checkClassEvolution() {
+        if (gameState.lv === 10 && gameState.tier === 0) {
+            showClassSelection(1);
+        } else if (gameState.lv === 100 && gameState.tier === 1) {
+            showClassSelection(2);
+        } else if (gameState.lv === 500 && gameState.tier === 2) {
+            showClassSelection(3);
+        }
+    }
+
+    function showClassSelection(tier) {
+        const modal = document.getElementById('class-modal');
+        const options = document.getElementById('class-options');
+        options.innerHTML = '';
+        modal.style.display = 'flex';
+
+        if (tier === 1) {
+            document.getElementById('modal-title').innerText = "เลือกอาชีพขั้นที่ 1 (Lv.10)";
+            classTree.tier1.forEach(c => {
+                const div = document.createElement('div');
+                div.className = 'class-card';
+                div.innerHTML = `<div style="font-size:30px">${c.emoji}</div><b>${c.name}</b>`;
+                div.onclick = () => selectJob(c, 1);
+                options.appendChild(div);
+            });
+        } else if (tier === 2) {
+            document.getElementById('modal-title').innerText = "เลื่อนขั้นอาชีพขั้นที่ 2 (Lv.100)";
+            const jobInfo = classTree.tier2[gameState.jobId];
+            const div = document.createElement('div');
+            div.className = 'class-card';
+            div.style.width = '300px';
+            div.innerHTML = `<div style="font-size:40px">${jobInfo.emoji}</div><b>${jobInfo.name}</b>`;
+            div.onclick = () => selectJob({ ...jobInfo, id: gameState.jobId }, 2);
+            options.appendChild(div);
+        } else if (tier === 3) {
+            document.getElementById('modal-title').innerText = "ปลดล็อกขั้นสูงสุด (Lv.500)";
+            const jobInfo = classTree.tier3[gameState.jobId];
+            const div = document.createElement('div');
+            div.className = 'class-card';
+            div.style.width = '300px';
+            div.innerHTML = `<div style="font-size:40px">${jobInfo.emoji}</div><b>${jobInfo.name}</b>`;
+            div.onclick = () => selectJob({ ...jobInfo, id: gameState.jobId }, 3);
+            options.appendChild(div);
+        }
+    }
+
+    function selectJob(job, tier) {
+        gameState.job = job.name;
+        gameState.tier = tier;
+        if (tier === 1) {
+            gameState.jobId = job.id;
+            gameState.atk += 20;
+            gameState.weapon = `อาวุธเริ่มต้นสาย ${job.id}`;
+        } else if (tier === 2) {
+            gameState.atk += 100;
+        } else if (tier === 3) {
+            gameState.atk += 1000;
+        }
+        
+        document.getElementById('player-emoji').innerText = job.emoji || '👤';
+        document.getElementById('class-modal').style.display = 'none';
+        addLog(`เปลี่ยนอาชีพเป็น ${job.name} เรียบร้อย!`);
+        updateUI();
+    }
+
+    function updateUI() {
+        document.getElementById('player-job').innerText = gameState.job;
+        document.getElementById('lv-text').innerText = gameState.lv;
+        document.getElementById('atk-text').innerText = gameState.atk;
+        document.getElementById('zeny-text').innerText = gameState.zeny;
+        document.getElementById('weapon-text').innerText = gameState.weapon;
+        
+        const expPct = (gameState.exp / gameState.expNext) * 100;
+        document.getElementById('exp-fill').style.width = expPct + "%";
+    }
+
+    function updateMonsterUI() {
+        const hpPct = (gameState.monsterHp / gameState.currentMonster.hp) * 100;
+        document.getElementById('hp-fill').style.width = hpPct + "%";
+        document.getElementById('hp-text').innerText = `${Math.max(0, gameState.monsterHp)} / ${gameState.currentMonster.hp}`;
+    }
+
+    function showDamage(dmg) {
+        const pop = document.createElement('div');
+        pop.className = 'damage-pop';
+        pop.innerText = `-${dmg}`;
+        pop.style.left = (Math.random() * 40 + 30) + "%";
+        pop.style.top = "40%";
+        document.getElementById('monster-container').appendChild(pop);
+        setTimeout(() => pop.remove(), 500);
+    }
+
+    function addLog(msg) {
+        const log = document.getElementById('log');
+        const entry = document.createElement('div');
+        entry.innerHTML = `> ${msg}`;
+        log.prepend(entry);
+    }
+
+    function renderInventory() {
+        const grid = document.getElementById('inventory-grid');
+        grid.innerHTML = '';
+        for (let i = 0; i < 16; i++) {
+            const slot = document.createElement('div');
+            slot.className = 'slot';
+            grid.appendChild(slot);
+        }
+    }
+
+    init();
+</script>
+</body>
+</html>
