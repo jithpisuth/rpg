@@ -140,222 +140,229 @@
 </div>
 
 <script>
-    const gameState = {
-        name: "J",
-        lv: 1, exp: 0, expNext: 15,
-        zeny: 0,
-        job: "Villager",
-        tier: 0, // 0: Villager, 1: Recruit/Adept, etc.
-        atk: 5, aspd: 1000,
-        weapon: "จอบไม้ (Wooden Hoe)",
-        inventory: {},
-        currentStage: 1,
-        monsterHp: 10,
-        currentMonster: null
-    };
+/* =========================
+   CORE GAME STATE
+========================= */
+const SAVE_KEY = "villager_rpg_save_v2";
+let attackInterval = null;
 
-    const classTree = {
-        tier1: [
-            { id: 'warrior', name: 'ทหารเกณฑ์ (Recruit)', emoji: '⚔️', bonusAtk: 10, color: 'var(--warrior)' },
-            { id: 'tank', name: 'ยามหมู่บ้าน (Militia)', emoji: '🛡️', bonusAtk: 5, color: 'var(--tank)' },
-            { id: 'mage', name: 'เด็กฝึกเวท (Adept)', emoji: '🪄', bonusAtk: 15, color: 'var(--mage)' },
-            { id: 'ranger', name: 'นายพราน (Hunter)', emoji: '🏹', bonusAtk: 8, color: 'var(--ranger)' }
-        ],
-        tier2: {
-            warrior: { name: 'อัศวิน (Knight)', emoji: '🛡️⚔️' },
-            tank: { name: 'ป้อมปราการ (Bulwark)', emoji: '🏰' },
-            mage: { name: 'จอมเวท (Mage)', emoji: '🔮' },
-            ranger: { name: 'มือสังหาร (Assassin)', emoji: '🗡️' }
-        },
-        tier3: {
-            warrior: { name: 'พาราดีน (Paladin)', emoji: '🔱' },
-            tank: { name: 'จักรพรรดิเหล็ก (Iron Sovereign)', emoji: '👑' },
-            mage: { name: 'มหาปราชญ์ (Archmage)', emoji: '🧙‍♂️' },
-            ranger: { name: 'เงาสังหาร (Shadow Walker)', emoji: '👤' }
-        }
-    };
+const gameState = {
+    name: "J",
+    lv: 1,
+    exp: 0,
+    expNext: 15,
+    zeny: 0,
+    job: "Villager",
+    jobId: null,
+    tier: 0,
+    atk: 5,
+    baseAtk: 5,
+    aspd: 1000,
+    critRate: 0.05,
+    critDmg: 1.5,
+    dps: 0,
+    weapon: "จอบไม้",
+    skillPoints: 0,
+    skills: {},
+    currentStage: 1,
+    monsterHp: 10,
+    currentMonster: null
+};
 
-    const monsters = [
-        { name: "หนูนา", emoji: "🐀", hp: 10, exp: 5, zeny: 2, minLv: 1, maxLv: 10, area: "หมู่บ้าน" },
-        { name: "สไลม์ป่า", emoji: "💧", hp: 30, exp: 12, zeny: 5, minLv: 11, maxLv: 50, area: "หมู่บ้าน" },
-        { name: "หมาป่าสีเทา", emoji: "🐺", hp: 150, exp: 45, zeny: 20, minLv: 51, maxLv: 100, area: "ป่ามรณะ" },
-        { name: "กอบลิน", emoji: "👺", hp: 400, exp: 120, zeny: 50, minLv: 101, maxLv: 150, area: "ป่ามรณะ" },
-        { name: "โครงกระดูก", emoji: "💀", hp: 1500, exp: 500, zeny: 150, minLv: 151, maxLv: 300, area: "ดันเจี้ยน" },
-        { name: "ซอมบี้", emoji: "🧟", hp: 3000, exp: 1200, zeny: 400, minLv: 301, maxLv: 500, area: "ดันเจี้ยน" },
-        { name: "มังกรแดง", emoji: "🐉", hp: 20000, exp: 8000, zeny: 2500, minLv: 501, maxLv: 999, area: "วิหารเทพ" }
-    ];
+/* =========================
+   MONSTERS
+========================= */
+const monsters = [
+    { name: "หนูนา", emoji: "🐀", hp: 10, exp: 5, zeny: 2, minLv: 1 },
+    { name: "สไลม์ป่า", emoji: "💧", hp: 40, exp: 15, zeny: 6, minLv: 10 },
+    { name: "หมาป่า", emoji: "🐺", hp: 150, exp: 45, zeny: 20, minLv: 50 },
+    { name: "กอบลิน", emoji: "👺", hp: 400, exp: 120, zeny: 50, minLv: 100 }
+];
 
-    function init() {
-        spawnMonster();
-        setInterval(autoAttack, gameState.aspd);
-        updateUI();
-        renderInventory();
+/* =========================
+   SKILL TREE
+========================= */
+const skillTree = {
+    power: { name: "Power Training", max: 5, effect: lvl => gameState.baseAtk += 3 },
+    crit: { name: "Critical Mastery", max: 5, effect: lvl => gameState.critRate += 0.02 },
+    speed: { name: "Attack Speed", max: 5, effect: lvl => gameState.aspd -= 60 }
+};
+
+/* =========================
+   INIT
+========================= */
+function init() {
+    loadGame();
+    spawnMonster();
+    startCombatLoop();
+    renderSkills();
+    updateUI();
+}
+
+/* =========================
+   COMBAT LOOP FIX
+========================= */
+function startCombatLoop() {
+    if (attackInterval) clearInterval(attackInterval);
+    attackInterval = setInterval(autoAttack, gameState.aspd);
+}
+
+function autoAttack() {
+    if (!gameState.currentMonster) return;
+    if (gameState.monsterHp <= 0) return;
+
+    let dmg = gameState.baseAtk;
+
+    if (Math.random() < gameState.critRate) {
+        dmg *= gameState.critDmg;
+        addLog("💥 CRITICAL!");
     }
 
-    function spawnMonster() {
-        const possible = monsters.filter(m => gameState.lv >= m.minLv);
-        const m = possible[Math.floor(Math.random() * possible.length)];
-        gameState.currentMonster = {...m};
-        gameState.monsterHp = m.hp;
-        
-        document.getElementById('monster-name').innerText = m.name;
-        document.getElementById('monster-visual').innerText = m.emoji;
-        document.getElementById('stage-name').innerText = `📍 ${m.area}`;
-        document.getElementById('stage-info').innerText = `LV. ${gameState.lv}`;
-        updateMonsterUI();
+    dmg = Math.floor(dmg);
+    gameState.monsterHp -= dmg;
+    gameState.dps = Math.floor(dmg * (1000 / gameState.aspd));
+
+    showDamage(dmg);
+
+    if (gameState.monsterHp <= 0) {
+        victory();
     }
 
-    function autoAttack() {
-        if (gameState.monsterHp <= 0) return;
-        
-        let dmg = gameState.atk + Math.floor(Math.random() * 3);
-        gameState.monsterHp -= dmg;
-        
-        showDamage(dmg);
-        const visual = document.getElementById('monster-visual');
-        visual.style.transform = "scale(0.8) translateY(10px)";
-        setTimeout(() => visual.style.transform = "scale(1)", 100);
+    updateMonsterUI();
+}
 
-        if (gameState.monsterHp <= 0) {
-            handleVictory();
-        }
-        updateMonsterUI();
+/* =========================
+   VICTORY
+========================= */
+function victory() {
+    const m = gameState.currentMonster;
+    gameState.exp += m.exp;
+    gameState.zeny += m.zeny;
+    addLog(`ฆ่า ${m.name} +${m.exp} EXP`);
+
+    if (gameState.exp >= gameState.expNext) {
+        levelUp();
     }
 
-    function handleVictory() {
-        const m = gameState.currentMonster;
-        gameState.exp += m.exp;
-        gameState.zeny += m.zeny;
-        addLog(`กำจัด ${m.name}! ได้รับ ${m.exp} EXP และ ${m.zeny} Zeny`);
+    saveGame();
+    spawnMonster();
+}
 
-        if (gameState.exp >= gameState.expNext) {
-            levelUp();
-        }
-        
-        spawnMonster();
-        updateUI();
+/* =========================
+   LEVEL UP
+========================= */
+function levelUp() {
+    gameState.lv++;
+    gameState.exp = 0;
+    gameState.expNext = Math.floor(gameState.expNext * 1.4);
+    gameState.skillPoints++;
+    gameState.baseAtk += 2;
+    addLog("🆙 LEVEL UP!");
+}
+
+/* =========================
+   SPAWN
+========================= */
+function spawnMonster() {
+    const possible = monsters.filter(m => gameState.lv >= m.minLv);
+    const m = possible[Math.floor(Math.random() * possible.length)];
+    gameState.currentMonster = { ...m };
+    gameState.monsterHp = m.hp;
+
+    document.getElementById("monster-name").innerText = m.name;
+    document.getElementById("monster-visual").innerText = m.emoji;
+
+    updateMonsterUI();
+}
+
+/* =========================
+   SKILLS SYSTEM
+========================= */
+function renderSkills() {
+    const container = document.getElementById("skill-list");
+    container.innerHTML = `<div>Skill Points: ${gameState.skillPoints}</div>`;
+
+    for (let key in skillTree) {
+        const skill = skillTree[key];
+        const current = gameState.skills[key] || 0;
+
+        const btn = document.createElement("button");
+        btn.innerText = `${skill.name} (${current}/${skill.max})`;
+        btn.onclick = () => upgradeSkill(key);
+        container.appendChild(btn);
     }
+}
 
-    function levelUp() {
-        gameState.lv++;
-        gameState.exp = 0;
-        gameState.expNext = Math.floor(gameState.expNext * 1.4);
-        gameState.atk += 2;
-        addLog(`<span style="color:var(--primary)">LEVEL UP! ตอนนี้เลเวล ${gameState.lv}</span>`);
+function upgradeSkill(key) {
+    const skill = skillTree[key];
+    const current = gameState.skills[key] || 0;
 
-        checkClassEvolution();
+    if (gameState.skillPoints <= 0) return;
+    if (current >= skill.max) return;
+
+    gameState.skillPoints--;
+    gameState.skills[key] = current + 1;
+    skill.effect(current + 1);
+
+    startCombatLoop(); // refresh aspd if changed
+    renderSkills();
+    updateUI();
+}
+
+/* =========================
+   SAVE SYSTEM
+========================= */
+function saveGame() {
+    localStorage.setItem(SAVE_KEY, JSON.stringify(gameState));
+}
+
+function loadGame() {
+    const save = localStorage.getItem(SAVE_KEY);
+    if (save) {
+        Object.assign(gameState, JSON.parse(save));
     }
+}
 
-    function checkClassEvolution() {
-        if (gameState.lv === 10 && gameState.tier === 0) {
-            showClassSelection(1);
-        } else if (gameState.lv === 100 && gameState.tier === 1) {
-            showClassSelection(2);
-        } else if (gameState.lv === 500 && gameState.tier === 2) {
-            showClassSelection(3);
-        }
-    }
+/* =========================
+   UI UPDATE
+========================= */
+function updateUI() {
+    document.getElementById("lv-text").innerText = gameState.lv;
+    document.getElementById("atk-text").innerText = gameState.baseAtk;
+    document.getElementById("zeny-text").innerText = gameState.zeny;
 
-    function showClassSelection(tier) {
-        const modal = document.getElementById('class-modal');
-        const options = document.getElementById('class-options');
-        options.innerHTML = '';
-        modal.style.display = 'flex';
+    document.getElementById("exp-fill").style.width =
+        (gameState.exp / gameState.expNext) * 100 + "%";
 
-        if (tier === 1) {
-            document.getElementById('modal-title').innerText = "เลือกอาชีพขั้นที่ 1 (Lv.10)";
-            classTree.tier1.forEach(c => {
-                const div = document.createElement('div');
-                div.className = 'class-card';
-                div.innerHTML = `<div style="font-size:30px">${c.emoji}</div><b>${c.name}</b>`;
-                div.onclick = () => selectJob(c, 1);
-                options.appendChild(div);
-            });
-        } else if (tier === 2) {
-            document.getElementById('modal-title').innerText = "เลื่อนขั้นอาชีพขั้นที่ 2 (Lv.100)";
-            const jobInfo = classTree.tier2[gameState.jobId];
-            const div = document.createElement('div');
-            div.className = 'class-card';
-            div.style.width = '300px';
-            div.innerHTML = `<div style="font-size:40px">${jobInfo.emoji}</div><b>${jobInfo.name}</b>`;
-            div.onclick = () => selectJob({ ...jobInfo, id: gameState.jobId }, 2);
-            options.appendChild(div);
-        } else if (tier === 3) {
-            document.getElementById('modal-title').innerText = "ปลดล็อกขั้นสูงสุด (Lv.500)";
-            const jobInfo = classTree.tier3[gameState.jobId];
-            const div = document.createElement('div');
-            div.className = 'class-card';
-            div.style.width = '300px';
-            div.innerHTML = `<div style="font-size:40px">${jobInfo.emoji}</div><b>${jobInfo.name}</b>`;
-            div.onclick = () => selectJob({ ...jobInfo, id: gameState.jobId }, 3);
-            options.appendChild(div);
-        }
-    }
+    renderSkills();
+}
 
-    function selectJob(job, tier) {
-        gameState.job = job.name;
-        gameState.tier = tier;
-        if (tier === 1) {
-            gameState.jobId = job.id;
-            gameState.atk += 20;
-            gameState.weapon = `อาวุธเริ่มต้นสาย ${job.id}`;
-        } else if (tier === 2) {
-            gameState.atk += 100;
-        } else if (tier === 3) {
-            gameState.atk += 1000;
-        }
-        
-        document.getElementById('player-emoji').innerText = job.emoji || '👤';
-        document.getElementById('class-modal').style.display = 'none';
-        addLog(`เปลี่ยนอาชีพเป็น ${job.name} เรียบร้อย!`);
-        updateUI();
-    }
+function updateMonsterUI() {
+    const hpPct =
+        (gameState.monsterHp / gameState.currentMonster.hp) * 100;
+    document.getElementById("hp-fill").style.width = hpPct + "%";
+    document.getElementById("hp-text").innerText =
+        `${Math.max(0, gameState.monsterHp)} / ${gameState.currentMonster.hp}`;
+}
 
-    function updateUI() {
-        document.getElementById('player-job').innerText = gameState.job;
-        document.getElementById('lv-text').innerText = gameState.lv;
-        document.getElementById('atk-text').innerText = gameState.atk;
-        document.getElementById('zeny-text').innerText = gameState.zeny;
-        document.getElementById('weapon-text').innerText = gameState.weapon;
-        
-        const expPct = (gameState.exp / gameState.expNext) * 100;
-        document.getElementById('exp-fill').style.width = expPct + "%";
-    }
+function showDamage(dmg) {
+    const pop = document.createElement("div");
+    pop.className = "damage-pop";
+    pop.innerText = `-${dmg}`;
+    pop.style.left = "50%";
+    pop.style.top = "40%";
+    document.getElementById("monster-container").appendChild(pop);
+    setTimeout(() => pop.remove(), 500);
+}
 
-    function updateMonsterUI() {
-        const hpPct = (gameState.monsterHp / gameState.currentMonster.hp) * 100;
-        document.getElementById('hp-fill').style.width = hpPct + "%";
-        document.getElementById('hp-text').innerText = `${Math.max(0, gameState.monsterHp)} / ${gameState.currentMonster.hp}`;
-    }
+function addLog(msg) {
+    const log = document.getElementById("log");
+    const entry = document.createElement("div");
+    entry.innerHTML = msg;
+    log.prepend(entry);
+}
 
-    function showDamage(dmg) {
-        const pop = document.createElement('div');
-        pop.className = 'damage-pop';
-        pop.innerText = `-${dmg}`;
-        pop.style.left = (Math.random() * 40 + 30) + "%";
-        pop.style.top = "40%";
-        document.getElementById('monster-container').appendChild(pop);
-        setTimeout(() => pop.remove(), 500);
-    }
-
-    function addLog(msg) {
-        const log = document.getElementById('log');
-        const entry = document.createElement('div');
-        entry.innerHTML = `> ${msg}`;
-        log.prepend(entry);
-    }
-
-    function renderInventory() {
-        const grid = document.getElementById('inventory-grid');
-        grid.innerHTML = '';
-        for (let i = 0; i < 16; i++) {
-            const slot = document.createElement('div');
-            slot.className = 'slot';
-            grid.appendChild(slot);
-        }
-    }
-
-    init();
+init();
 </script>
 </body>
 </html>
