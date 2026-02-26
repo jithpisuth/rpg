@@ -140,229 +140,326 @@
 </div>
 
 <script>
-/* =========================
-   CORE GAME STATE
-========================= */
-const SAVE_KEY = "villager_rpg_save_v2";
-let attackInterval = null;
 
-const gameState = {
-    name: "J",
-    lv: 1,
-    exp: 0,
-    expNext: 15,
-    zeny: 0,
-    job: "Villager",
-    jobId: null,
-    tier: 0,
-    atk: 5,
-    baseAtk: 5,
-    aspd: 1000,
-    critRate: 0.05,
-    critDmg: 1.5,
-    dps: 0,
-    weapon: "จอบไม้",
-    skillPoints: 0,
-    skills: {},
-    currentStage: 1,
-    monsterHp: 10,
-    currentMonster: null
+/* ======================================================
+   AAA RPG V6
+   - Element applies only on Skills
+   - Skill System with Cooldown
+====================================================== */
+
+const SAVE_KEY = "AAA_RPG_V6";
+let autoLoop = null;
+
+/* ======================================================
+   ELEMENT SYSTEM (ใช้เฉพาะ Skill)
+====================================================== */
+
+const Elements = {
+    list: ["Fire","Water","Earth","Wind"],
+
+    table: {
+        Fire:   { strong:"Earth", weak:"Water" },
+        Water:  { strong:"Fire",  weak:"Wind"  },
+        Earth:  { strong:"Wind",  weak:"Fire"  },
+        Wind:   { strong:"Water", weak:"Earth" }
+    },
+
+    multiplier(attacker, defender) {
+        if (!attacker) return 1;
+
+        if (this.table[attacker].strong === defender) return 1.5;
+        if (this.table[attacker].weak === defender) return 0.7;
+
+        return 1;
+    }
 };
 
-/* =========================
-   MONSTERS
-========================= */
-const monsters = [
-    { name: "หนูนา", emoji: "🐀", hp: 10, exp: 5, zeny: 2, minLv: 1 },
-    { name: "สไลม์ป่า", emoji: "💧", hp: 40, exp: 15, zeny: 6, minLv: 10 },
-    { name: "หมาป่า", emoji: "🐺", hp: 150, exp: 45, zeny: 20, minLv: 50 },
-    { name: "กอบลิน", emoji: "👺", hp: 400, exp: 120, zeny: 50, minLv: 100 }
+/* ======================================================
+   SKILL SYSTEM
+====================================================== */
+
+const SkillDB = [
+    {
+        id:"fireball",
+        name:"🔥 Fireball",
+        power:2.5,
+        element:"Fire",
+        cooldown:4000,
+        lastUsed:0
+    },
+    {
+        id:"waterSlash",
+        name:"💧 Aqua Slash",
+        power:2.2,
+        element:"Water",
+        cooldown:3500,
+        lastUsed:0
+    }
 ];
 
-/* =========================
-   SKILL TREE
-========================= */
-const skillTree = {
-    power: { name: "Power Training", max: 5, effect: lvl => gameState.baseAtk += 3 },
-    crit: { name: "Critical Mastery", max: 5, effect: lvl => gameState.critRate += 0.02 },
-    speed: { name: "Attack Speed", max: 5, effect: lvl => gameState.aspd -= 60 }
+/* ======================================================
+   GAME STATE
+====================================================== */
+
+const Game = {
+
+    state:null,
+
+    defaultState() {
+        return {
+            lv:1,
+            exp:0,
+            expNext:20,
+            zeny:0,
+
+            baseAtk:5,
+            critRate:0.05,
+            critDmg:1.5,
+            aspd:1000,
+
+            stage:1,
+            monster:null,
+            monsterHp:0,
+
+            inventory:[],
+            skills:[]
+        }
+    },
+
+    init() {
+        this.load();
+
+        // ให้เริ่มมี Fireball ทดสอบ
+        if(this.state.skills.length===0)
+            this.state.skills.push({...SkillDB[0]});
+
+        Stage.spawn();
+        Combat.start();
+        UI.bindClickAttack();
+        UI.renderSkills();
+        UI.updateAll();
+    },
+
+    save(){ localStorage.setItem(SAVE_KEY, JSON.stringify(this.state)); },
+    load(){
+        const s = localStorage.getItem(SAVE_KEY);
+        this.state = s ? JSON.parse(s) : this.defaultState();
+    }
 };
 
-/* =========================
-   INIT
-========================= */
-function init() {
-    loadGame();
-    spawnMonster();
-    startCombatLoop();
-    renderSkills();
-    updateUI();
-}
+/* ======================================================
+   STAGE
+====================================================== */
 
-/* =========================
-   COMBAT LOOP FIX
-========================= */
-function startCombatLoop() {
-    if (attackInterval) clearInterval(attackInterval);
-    attackInterval = setInterval(autoAttack, gameState.aspd);
-}
+const Stage = {
 
-function autoAttack() {
-    if (!gameState.currentMonster) return;
-    if (gameState.monsterHp <= 0) return;
+    spawn() {
 
-    let dmg = gameState.baseAtk;
+        const scale = Game.state.stage;
 
-    if (Math.random() < gameState.critRate) {
-        dmg *= gameState.critDmg;
-        addLog("💥 CRITICAL!");
+        const element =
+            Elements.list[Math.floor(Math.random()*Elements.list.length)];
+
+        const monster = {
+            name:"Wild Beast",
+            emoji:"🐺",
+            hp:40*scale,
+            exp:10*scale,
+            zeny:5*scale,
+            element:element
+        };
+
+        Game.state.monster=monster;
+        Game.state.monsterHp=monster.hp;
+
+        UI.updateMonster();
     }
+};
 
-    dmg = Math.floor(dmg);
-    gameState.monsterHp -= dmg;
-    gameState.dps = Math.floor(dmg * (1000 / gameState.aspd));
+/* ======================================================
+   COMBAT
+====================================================== */
 
-    showDamage(dmg);
+const Combat = {
 
-    if (gameState.monsterHp <= 0) {
-        victory();
+    start(){
+        if(autoLoop) clearInterval(autoLoop);
+
+        autoLoop=setInterval(()=>{
+            Combat.normalAttack();
+        },Game.state.aspd);
+    },
+
+    normalAttack(){
+        Combat.dealDamage(Game.state.baseAtk, null);
+    },
+
+    useSkill(skillId){
+
+        const skill =
+            Game.state.skills.find(s=>s.id===skillId);
+
+        const now = Date.now();
+        if(now - skill.lastUsed < skill.cooldown) return;
+
+        skill.lastUsed = now;
+
+        const base =
+            Game.state.baseAtk * skill.power;
+
+        const elementBonus =
+            Elements.multiplier(skill.element,
+                                Game.state.monster.element);
+
+        Combat.dealDamage(base * elementBonus,
+                          skill.element,
+                          elementBonus);
+    },
+
+    dealDamage(amount, element=null, elementBonus=1){
+
+        if(Game.state.monsterHp<=0) return;
+
+        let dmg = amount;
+
+        if(Math.random()<Game.state.critRate)
+            dmg*=Game.state.critDmg;
+
+        dmg=Math.floor(dmg);
+
+        Game.state.monsterHp-=dmg;
+
+        UI.showDamage(dmg, elementBonus, element);
+        UI.updateMonster();
+
+        if(Game.state.monsterHp<=0)
+            Combat.victory();
+    },
+
+    victory(){
+
+        const m=Game.state.monster;
+
+        Game.state.exp+=m.exp;
+        Game.state.zeny+=m.zeny;
+
+        if(Game.state.exp>=Game.state.expNext)
+            Level.up();
+
+        Game.state.stage++;
+        Stage.spawn();
+
+        UI.updateAll();
+        Game.save();
     }
+};
 
-    updateMonsterUI();
-}
+/* ======================================================
+   LEVEL
+====================================================== */
 
-/* =========================
-   VICTORY
-========================= */
-function victory() {
-    const m = gameState.currentMonster;
-    gameState.exp += m.exp;
-    gameState.zeny += m.zeny;
-    addLog(`ฆ่า ${m.name} +${m.exp} EXP`);
-
-    if (gameState.exp >= gameState.expNext) {
-        levelUp();
+const Level={
+    up(){
+        Game.state.lv++;
+        Game.state.exp=0;
+        Game.state.expNext=Math.floor(Game.state.expNext*1.35);
+        Game.state.baseAtk+=3;
     }
+};
 
-    saveGame();
-    spawnMonster();
-}
+/* ======================================================
+   UI
+====================================================== */
 
-/* =========================
-   LEVEL UP
-========================= */
-function levelUp() {
-    gameState.lv++;
-    gameState.exp = 0;
-    gameState.expNext = Math.floor(gameState.expNext * 1.4);
-    gameState.skillPoints++;
-    gameState.baseAtk += 2;
-    addLog("🆙 LEVEL UP!");
-}
+const UI={
 
-/* =========================
-   SPAWN
-========================= */
-function spawnMonster() {
-    const possible = monsters.filter(m => gameState.lv >= m.minLv);
-    const m = possible[Math.floor(Math.random() * possible.length)];
-    gameState.currentMonster = { ...m };
-    gameState.monsterHp = m.hp;
+    bindClickAttack(){
+        document.getElementById("monster-visual")
+            .addEventListener("click",
+                ()=>Combat.normalAttack());
+    },
 
-    document.getElementById("monster-name").innerText = m.name;
-    document.getElementById("monster-visual").innerText = m.emoji;
+    updateAll(){
 
-    updateMonsterUI();
-}
+        document.getElementById("lv-text").innerText=
+            Game.state.lv;
 
-/* =========================
-   SKILLS SYSTEM
-========================= */
-function renderSkills() {
-    const container = document.getElementById("skill-list");
-    container.innerHTML = `<div>Skill Points: ${gameState.skillPoints}</div>`;
+        document.getElementById("atk-text").innerText=
+            Game.state.baseAtk;
 
-    for (let key in skillTree) {
-        const skill = skillTree[key];
-        const current = gameState.skills[key] || 0;
+        document.getElementById("zeny-text").innerText=
+            Game.state.zeny;
 
-        const btn = document.createElement("button");
-        btn.innerText = `${skill.name} (${current}/${skill.max})`;
-        btn.onclick = () => upgradeSkill(key);
-        container.appendChild(btn);
+        const expPercent=
+            (Game.state.exp/Game.state.expNext)*100;
+
+        document.getElementById("exp-fill")
+            .style.width=expPercent+"%";
+    },
+
+    updateMonster(){
+
+        const hpPercent=
+            (Game.state.monsterHp/
+             Game.state.monster.hp)*100;
+
+        document.getElementById("hp-fill")
+            .style.width=hpPercent+"%";
+
+        document.getElementById("hp-text").innerText=
+            Math.max(0,Game.state.monsterHp)+
+            " / "+Game.state.monster.hp;
+
+        document.getElementById("monster-name").innerText=
+            Game.state.monster.name+
+            " ["+Game.state.monster.element+"]";
+    },
+
+    showDamage(dmg,elementBonus,element){
+
+        const pop=document.createElement("div");
+        pop.className="damage-pop";
+
+        if(element)
+            pop.style.color="cyan";
+
+        if(elementBonus>1)
+            pop.style.color="orange";
+
+        if(elementBonus<1)
+            pop.style.color="gray";
+
+        pop.innerText="-"+dmg;
+
+        pop.style.left="50%";
+        pop.style.top="40%";
+
+        document.getElementById("monster-container")
+            .appendChild(pop);
+
+        setTimeout(()=>pop.remove(),500);
+    },
+
+    renderSkills(){
+
+        const list =
+            document.getElementById("skill-list");
+
+        list.innerHTML="";
+
+        Game.state.skills.forEach(skill=>{
+
+            const btn=document.createElement("button");
+            btn.innerText=skill.name;
+            btn.onclick=()=>Combat.useSkill(skill.id);
+
+            list.appendChild(btn);
+        });
     }
-}
+};
 
-function upgradeSkill(key) {
-    const skill = skillTree[key];
-    const current = gameState.skills[key] || 0;
+Game.init();
 
-    if (gameState.skillPoints <= 0) return;
-    if (current >= skill.max) return;
-
-    gameState.skillPoints--;
-    gameState.skills[key] = current + 1;
-    skill.effect(current + 1);
-
-    startCombatLoop(); // refresh aspd if changed
-    renderSkills();
-    updateUI();
-}
-
-/* =========================
-   SAVE SYSTEM
-========================= */
-function saveGame() {
-    localStorage.setItem(SAVE_KEY, JSON.stringify(gameState));
-}
-
-function loadGame() {
-    const save = localStorage.getItem(SAVE_KEY);
-    if (save) {
-        Object.assign(gameState, JSON.parse(save));
-    }
-}
-
-/* =========================
-   UI UPDATE
-========================= */
-function updateUI() {
-    document.getElementById("lv-text").innerText = gameState.lv;
-    document.getElementById("atk-text").innerText = gameState.baseAtk;
-    document.getElementById("zeny-text").innerText = gameState.zeny;
-
-    document.getElementById("exp-fill").style.width =
-        (gameState.exp / gameState.expNext) * 100 + "%";
-
-    renderSkills();
-}
-
-function updateMonsterUI() {
-    const hpPct =
-        (gameState.monsterHp / gameState.currentMonster.hp) * 100;
-    document.getElementById("hp-fill").style.width = hpPct + "%";
-    document.getElementById("hp-text").innerText =
-        `${Math.max(0, gameState.monsterHp)} / ${gameState.currentMonster.hp}`;
-}
-
-function showDamage(dmg) {
-    const pop = document.createElement("div");
-    pop.className = "damage-pop";
-    pop.innerText = `-${dmg}`;
-    pop.style.left = "50%";
-    pop.style.top = "40%";
-    document.getElementById("monster-container").appendChild(pop);
-    setTimeout(() => pop.remove(), 500);
-}
-
-function addLog(msg) {
-    const log = document.getElementById("log");
-    const entry = document.createElement("div");
-    entry.innerHTML = msg;
-    log.prepend(entry);
-}
-
-init();
 </script>
 </body>
 </html>
