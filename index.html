@@ -141,325 +141,369 @@
 
 <script>
 
-/* ======================================================
-   AAA RPG V6
-   - Element applies only on Skills
-   - Skill System with Cooldown
-====================================================== */
+/* =====================================================
+   AAA RPG V8 – STABLE BUILD
+===================================================== */
 
-const SAVE_KEY = "AAA_RPG_V6";
-let autoLoop = null;
+const SAVE_KEY="AAA_RPG_V8";
 
-/* ======================================================
-   ELEMENT SYSTEM (ใช้เฉพาะ Skill)
-====================================================== */
+let autoLoop=null;
+let tickLoop=null;
 
-const Elements = {
-    list: ["Fire","Water","Earth","Wind"],
+/* ================= ELEMENT ================= */
 
-    table: {
-        Fire:   { strong:"Earth", weak:"Water" },
-        Water:  { strong:"Fire",  weak:"Wind"  },
-        Earth:  { strong:"Wind",  weak:"Fire"  },
-        Wind:   { strong:"Water", weak:"Earth" }
-    },
-
-    multiplier(attacker, defender) {
-        if (!attacker) return 1;
-
-        if (this.table[attacker].strong === defender) return 1.5;
-        if (this.table[attacker].weak === defender) return 0.7;
-
-        return 1;
-    }
+const Elements={
+list:["Fire","Water","Earth","Wind"],
+table:{
+Fire:{strong:"Earth",weak:"Water"},
+Water:{strong:"Fire",weak:"Wind"},
+Earth:{strong:"Wind",weak:"Fire"},
+Wind:{strong:"Water",weak:"Earth"}
+},
+multiplier(a,d){
+if(!a) return 1;
+if(this.table[a].strong===d) return 1.5;
+if(this.table[a].weak===d) return 0.7;
+return 1;
+}
 };
 
-/* ======================================================
-   SKILL SYSTEM
-====================================================== */
+/* ================= JOB ================= */
 
-const SkillDB = [
-    {
-        id:"fireball",
-        name:"🔥 Fireball",
-        power:2.5,
-        element:"Fire",
-        cooldown:4000,
-        lastUsed:0
-    },
-    {
-        id:"waterSlash",
-        name:"💧 Aqua Slash",
-        power:2.2,
-        element:"Water",
-        cooldown:3500,
-        lastUsed:0
-    }
-];
-
-/* ======================================================
-   GAME STATE
-====================================================== */
-
-const Game = {
-
-    state:null,
-
-    defaultState() {
-        return {
-            lv:1,
-            exp:0,
-            expNext:20,
-            zeny:0,
-
-            baseAtk:5,
-            critRate:0.05,
-            critDmg:1.5,
-            aspd:1000,
-
-            stage:1,
-            monster:null,
-            monsterHp:0,
-
-            inventory:[],
-            skills:[]
-        }
-    },
-
-    init() {
-        this.load();
-
-        // ให้เริ่มมี Fireball ทดสอบ
-        if(this.state.skills.length===0)
-            this.state.skills.push({...SkillDB[0]});
-
-        Stage.spawn();
-        Combat.start();
-        UI.bindClickAttack();
-        UI.renderSkills();
-        UI.updateAll();
-    },
-
-    save(){ localStorage.setItem(SAVE_KEY, JSON.stringify(this.state)); },
-    load(){
-        const s = localStorage.getItem(SAVE_KEY);
-        this.state = s ? JSON.parse(s) : this.defaultState();
-    }
+const Jobs={
+warrior:{name:"⚔ Warrior",bonus:{atk:5,matk:0},skills:["powerStrike"]},
+tank:{name:"🛡 Tank",bonus:{atk:3,matk:0},skills:["shieldBurn"]},
+mage:{name:"🧙 Mage",bonus:{atk:0,matk:6},skills:["fireball"]},
+ranger:{name:"🏹 Ranger",bonus:{atk:4,matk:2},skills:["frostShot"]}
 };
 
-/* ======================================================
-   STAGE
-====================================================== */
+/* ================= SKILLS ================= */
 
-const Stage = {
-
-    spawn() {
-
-        const scale = Game.state.stage;
-
-        const element =
-            Elements.list[Math.floor(Math.random()*Elements.list.length)];
-
-        const monster = {
-            name:"Wild Beast",
-            emoji:"🐺",
-            hp:40*scale,
-            exp:10*scale,
-            zeny:5*scale,
-            element:element
-        };
-
-        Game.state.monster=monster;
-        Game.state.monsterHp=monster.hp;
-
-        UI.updateMonster();
-    }
+const SkillDB={
+powerStrike:{name:"Power Strike",type:"physical",power:2,cooldown:4000},
+fireball:{name:"🔥 Fireball",type:"magical",power:2.5,element:"Fire",cooldown:5000,effect:"burn"},
+frostShot:{name:"❄ Frost Shot",type:"physical",power:2,element:"Water",cooldown:4500,effect:"freeze"},
+shieldBurn:{name:"Flame Shield",type:"physical",power:1.5,element:"Fire",cooldown:5000,effect:"burn"}
 };
 
-/* ======================================================
-   COMBAT
-====================================================== */
+/* ================= GAME ================= */
 
-const Combat = {
+const Game={
+state:null,
+runtime:{
+burnTimer:0,
+freezeTimer:0
+},
 
-    start(){
-        if(autoLoop) clearInterval(autoLoop);
+default(){
+return{
+lv:1,
+exp:0,
+expNext:20,
+zeny:0,
 
-        autoLoop=setInterval(()=>{
-            Combat.normalAttack();
-        },Game.state.aspd);
-    },
+job:null,
 
-    normalAttack(){
-        Combat.dealDamage(Game.state.baseAtk, null);
-    },
+baseAtk:5,
+baseMatk:3,
 
-    useSkill(skillId){
+critRate:0.05,
+critDmg:1.5,
+aspd:1000,
 
-        const skill =
-            Game.state.skills.find(s=>s.id===skillId);
+stage:1,
+monster:null,
+monsterHp:0,
 
-        const now = Date.now();
-        if(now - skill.lastUsed < skill.cooldown) return;
+skills:[],
+inventory:[]
+}
+},
 
-        skill.lastUsed = now;
+init(){
+this.load();
+Stage.spawn();
+Combat.start();
+UI.bind();
+UI.renderSkills();
+UI.updateAll();
+},
 
-        const base =
-            Game.state.baseAtk * skill.power;
-
-        const elementBonus =
-            Elements.multiplier(skill.element,
-                                Game.state.monster.element);
-
-        Combat.dealDamage(base * elementBonus,
-                          skill.element,
-                          elementBonus);
-    },
-
-    dealDamage(amount, element=null, elementBonus=1){
-
-        if(Game.state.monsterHp<=0) return;
-
-        let dmg = amount;
-
-        if(Math.random()<Game.state.critRate)
-            dmg*=Game.state.critDmg;
-
-        dmg=Math.floor(dmg);
-
-        Game.state.monsterHp-=dmg;
-
-        UI.showDamage(dmg, elementBonus, element);
-        UI.updateMonster();
-
-        if(Game.state.monsterHp<=0)
-            Combat.victory();
-    },
-
-    victory(){
-
-        const m=Game.state.monster;
-
-        Game.state.exp+=m.exp;
-        Game.state.zeny+=m.zeny;
-
-        if(Game.state.exp>=Game.state.expNext)
-            Level.up();
-
-        Game.state.stage++;
-        Stage.spawn();
-
-        UI.updateAll();
-        Game.save();
-    }
+save(){localStorage.setItem(SAVE_KEY,JSON.stringify(this.state));},
+load(){
+const s=localStorage.getItem(SAVE_KEY);
+this.state=s?JSON.parse(s):this.default();
+}
 };
 
-/* ======================================================
-   LEVEL
-====================================================== */
+/* ================= STAGE ================= */
+
+const Stage={
+spawn(){
+const s=Game.state.stage;
+
+Game.state.monster={
+name:"Wild Beast",
+emoji:"🐺",
+hp:40*s,
+exp:10*s,
+zeny:5*s,
+element:Elements.list[Math.floor(Math.random()*4)]
+};
+
+Game.state.monsterHp=Game.state.monster.hp;
+Game.runtime.burnTimer=0;
+Game.runtime.freezeTimer=0;
+
+UI.updateMonster();
+}
+};
+
+/* ================= COMBAT ================= */
+
+const Combat={
+
+start(){
+if(autoLoop)clearInterval(autoLoop);
+autoLoop=setInterval(()=>this.autoAttack(),Game.state.aspd);
+},
+
+autoAttack(){
+if(Game.runtime.freezeTimer>0) return;
+this.damage(Game.state.baseAtk);
+},
+
+useSkill(id){
+const skill=Game.state.skills.find(s=>s.id===id);
+if(!skill||skill.cd>0) return;
+
+skill.cd=skill.cooldown;
+
+let base=skill.type==="physical"
+?Game.state.baseAtk
+:Game.state.baseMatk;
+
+let dmg=base*skill.power;
+
+if(skill.element){
+dmg*=Elements.multiplier(
+skill.element,
+Game.state.monster.element);
+}
+
+this.damage(dmg);
+
+if(skill.effect==="burn")
+Game.runtime.burnTimer=3000;
+
+if(skill.effect==="freeze")
+Game.runtime.freezeTimer=2000;
+},
+
+damage(amount){
+
+if(Game.state.monsterHp<=0) return;
+
+let dmg=amount;
+
+if(Math.random()<Game.state.critRate)
+dmg*=Game.state.critDmg;
+
+dmg=Math.floor(dmg);
+Game.state.monsterHp-=dmg;
+
+UI.damage(dmg);
+
+if(Game.state.monsterHp<=0)
+this.victory();
+},
+
+victory(){
+
+const m=Game.state.monster;
+
+Game.state.exp+=m.exp;
+Game.state.zeny+=m.zeny;
+
+UI.log(`+${m.exp} EXP | +${m.zeny} Zeny`);
+
+while(Game.state.exp>=Game.state.expNext)
+Level.up();
+
+Game.state.stage++;
+Stage.spawn();
+UI.updateAll();
+Game.save();
+}
+};
+
+/* ================= LEVEL ================= */
 
 const Level={
-    up(){
-        Game.state.lv++;
-        Game.state.exp=0;
-        Game.state.expNext=Math.floor(Game.state.expNext*1.35);
-        Game.state.baseAtk+=3;
-    }
+up(){
+Game.state.exp-=Game.state.expNext;
+Game.state.lv++;
+Game.state.expNext=Math.floor(Game.state.expNext*1.3);
+Game.state.baseAtk+=2;
+Game.state.baseMatk+=2;
+
+UI.log("⭐ LEVEL UP!");
+
+if(Game.state.lv===10&&!Game.state.job)
+UI.showJobSelect();
+}
 };
 
-/* ======================================================
-   UI
-====================================================== */
+/* ================= UI ================= */
 
 const UI={
 
-    bindClickAttack(){
-        document.getElementById("monster-visual")
-            .addEventListener("click",
-                ()=>Combat.normalAttack());
-    },
+bind(){
+document.getElementById("monster-visual")
+.addEventListener("click",
+()=>Combat.autoAttack());
+},
 
-    updateAll(){
+updateAll(){
+document.getElementById("lv-text").innerText=Game.state.lv;
+document.getElementById("atk-text").innerText=Game.state.baseAtk;
+document.getElementById("zeny-text").innerText=Game.state.zeny;
 
-        document.getElementById("lv-text").innerText=
-            Game.state.lv;
+const percent=
+(Game.state.exp/Game.state.expNext)*100;
 
-        document.getElementById("atk-text").innerText=
-            Game.state.baseAtk;
+document.getElementById("exp-fill").style.width=
+percent+"%";
 
-        document.getElementById("zeny-text").innerText=
-            Game.state.zeny;
+document.getElementById("player-job").innerText=
+Game.state.job
+?Jobs[Game.state.job].name
+:"ชาวบ้าน (Villager)";
+},
 
-        const expPercent=
-            (Game.state.exp/Game.state.expNext)*100;
+updateMonster(){
+const hpPercent=
+(Game.state.monsterHp/
+Game.state.monster.hp)*100;
 
-        document.getElementById("exp-fill")
-            .style.width=expPercent+"%";
-    },
+document.getElementById("hp-fill").style.width=
+hpPercent+"%";
 
-    updateMonster(){
+document.getElementById("hp-text").innerText=
+Math.max(0,Game.state.monsterHp)+
+" / "+Game.state.monster.hp;
 
-        const hpPercent=
-            (Game.state.monsterHp/
-             Game.state.monster.hp)*100;
+document.getElementById("monster-name").innerText=
+Game.state.monster.name+
+" ["+Game.state.monster.element+"]";
+},
 
-        document.getElementById("hp-fill")
-            .style.width=hpPercent+"%";
+damage(d){
+const pop=document.createElement("div");
+pop.className="damage-pop";
+pop.innerText="-"+d;
+document.getElementById("monster-container")
+.appendChild(pop);
+setTimeout(()=>pop.remove(),600);
+},
 
-        document.getElementById("hp-text").innerText=
-            Math.max(0,Game.state.monsterHp)+
-            " / "+Game.state.monster.hp;
+renderSkills(){
+const list=document.getElementById("skill-list");
+list.innerHTML="";
+Game.state.skills.forEach(skill=>{
+skill.cd=skill.cd||0;
+const btn=document.createElement("button");
+btn.id="skill_"+skill.id;
+btn.onclick=()=>Combat.useSkill(skill.id);
+list.appendChild(btn);
+});
+},
 
-        document.getElementById("monster-name").innerText=
-            Game.state.monster.name+
-            " ["+Game.state.monster.element+"]";
-    },
+updateCooldowns(dt){
+Game.state.skills.forEach(skill=>{
+if(skill.cd>0){
+skill.cd-=dt;
+if(skill.cd<0)skill.cd=0;
+const btn=document.getElementById("skill_"+skill.id);
+if(btn){
+btn.innerText=
+skill.name+
+(skill.cd>0?
+` (${(skill.cd/1000).toFixed(1)})`:"");
+btn.disabled=skill.cd>0;
+}
+}
+});
+},
 
-    showDamage(dmg,elementBonus,element){
+log(text){
+const log=document.getElementById("log");
+log.innerHTML+=text+"<br>";
+log.scrollTop=log.scrollHeight;
+},
 
-        const pop=document.createElement("div");
-        pop.className="damage-pop";
+showJobSelect(){
+const modal=document.getElementById("class-modal");
+const options=document.getElementById("class-options");
+modal.style.display="flex";
+options.innerHTML="";
 
-        if(element)
-            pop.style.color="cyan";
+for(let key in Jobs){
+const card=document.createElement("div");
+card.className="class-card";
+card.innerText=Jobs[key].name;
+card.onclick=()=>{
+Game.state.job=key;
+Game.state.baseAtk+=Jobs[key].bonus.atk;
+Game.state.baseMatk+=Jobs[key].bonus.matk;
 
-        if(elementBonus>1)
-            pop.style.color="orange";
+Game.state.skills=
+Jobs[key].skills.map(id=>({
+id:id,
+...SkillDB[id],
+cd:0
+}));
 
-        if(elementBonus<1)
-            pop.style.color="gray";
-
-        pop.innerText="-"+dmg;
-
-        pop.style.left="50%";
-        pop.style.top="40%";
-
-        document.getElementById("monster-container")
-            .appendChild(pop);
-
-        setTimeout(()=>pop.remove(),500);
-    },
-
-    renderSkills(){
-
-        const list =
-            document.getElementById("skill-list");
-
-        list.innerHTML="";
-
-        Game.state.skills.forEach(skill=>{
-
-            const btn=document.createElement("button");
-            btn.innerText=skill.name;
-            btn.onclick=()=>Combat.useSkill(skill.id);
-
-            list.appendChild(btn);
-        });
-    }
+modal.style.display="none";
+UI.renderSkills();
+UI.updateAll();
 };
+options.appendChild(card);
+}
+}
+};
+
+/* ================= TICK LOOP ================= */
+
+let last=Date.now();
+
+tickLoop=setInterval(()=>{
+const now=Date.now();
+const dt=now-last;
+last=now;
+
+UI.updateCooldowns(dt);
+
+/* Burn */
+if(Game.runtime.burnTimer>0){
+Game.runtime.burnTimer-=dt;
+if(Game.runtime.burnTimer%1000<dt){
+Game.state.monsterHp-=5;
+UI.damage(5);
+}
+}
+
+/* Freeze */
+if(Game.runtime.freezeTimer>0)
+Game.runtime.freezeTimer-=dt;
+
+UI.updateMonster();
+
+},100);
 
 Game.init();
 
 </script>
+
 </body>
 </html>
